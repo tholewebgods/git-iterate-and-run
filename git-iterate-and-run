@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# Iterate over last N commits and run the specified command
+#
+#    $ git-iterate-an-run [<branch name>] <N> -- <command> <with> <multiple> <arguments>
+#
+#
+# Author Thomas Lehmann (t.lehmann@strato-rz.de) 2014
+#
+# MIT licensed
+
+
+function help(){
+	cat <<-EOF
+	Usage: $( basename ${0} ) [<branch name>] <N> -- <command> <with> <multiple> <arguments>
+
+	Iterate over last N commits of the current branch (optionally the specifiedbranch) and run the specified command(s)
+
+	             N   Number of commits
+	   branch name   Branch the checkout
+	    command...   Command(s) to execute
+EOF
+}
+
+# progress <N> <MAX>
+#
+progress(){
+	local LENGTH=20
+
+	PCT=$(( ( ${LENGTH} / $2 ) * $1 ))
+	REM=$(( ${LENGTH} - ${PCT} ))
+
+	echo -n "["
+
+	for N in $( seq 1 ${PCT} ); do echo -n "="; done
+	for N in $( seq 1 ${REM} ); do echo -n " "; done
+
+	echo -n "]"
+}
+
+
+if [[ ${*} =~ ^.*-?-h(elp)?.*$ ]]; then
+	help
+	exit 1
+fi
+
+# We need at least 3 = one own argument + the hyphens + one command
+#
+if [ ${#} -lt 3 ]; then
+	echo "Not enough arguments: missing, at least, the number of commits to iterate. Try --help."
+	exit 1
+fi
+
+
+_CURR_BRANCH="$( git br --contains HEAD | sed -r '/^\* /s///' )"
+
+# default to current branch
+#
+_BRANCH="${_CURR_BRANCH}"
+
+
+# Count own args first
+#
+OWN_PARAM_IDX=1
+
+while [ $( eval echo "\${${OWN_PARAM_IDX}}" ) != "--" ]; do
+	(( OWN_PARAM_IDX++ ))
+done
+
+(( OWN_PARAM_IDX-- ))
+
+# Check own arguments
+#
+if [ ${OWN_PARAM_IDX} -eq 1 ]; then
+	_COUNT="${1}"
+	shift
+elif [ ${OWN_PARAM_IDX} -eq 2 ]; then
+	_BRANCH="${1}"
+	_COUNT="${2}"
+	shift
+	shift
+else
+	shift
+	shift
+
+	# Check if there are  remaining arguments
+	while [ ${1} != "--" ]; do
+		echo "Unrecognized argument '${1}'"
+		exit 2
+	done
+fi
+
+
+# drop "--"
+#
+shift
+
+
+for N in $( seq 0 ${_COUNT} | sort -nr ); do
+	progress $(( ${_COUNT} - ${N} )) ${_COUNT}
+	echo -n " ($(( ${_COUNT} - ${N} + 1 )) / ${_COUNT}) -- "
+
+	git checkout ${_BRANCH}~${N} >/dev/null 2>&1
+	echo "$( git log --oneline -1 HEAD )"
+
+	eval "${*}"
+done
+
+
+# Jump back
+#
+git checkout ${_CURR_BRANCH} >/dev/null 2>&1
+
