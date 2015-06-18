@@ -121,29 +121,58 @@ if [ "$1" == "--" ]; then
 	shift
 fi
 
-function _on_break() {
+function _on_finished() {
 	# restore
 	git checkout ${_CURR_BRANCH} >/dev/null 2>&1
+
+	echo "--------------------------------------------------------"
+	echo -e "$( cat ${STAT_LOG} )"
+	rm ${STAT_LOG}
+}
+
+function _on_break() {
+	_on_finished
 	exit 100
 }
+
+__OK="\033[0;32m✓\033[0m"
+__OK_="\\033[0;32m✓\\033[0m"
+__NOK="\033[0;31mx\033[0m"
+__NOK_="\\033[0;31mx\\033[0m"
+
 
 trap _on_break SIGINT SIGQUIT SIGTERM
 
 _COUNT="$( echo "${COMMITS}" | wc -l )"
 N=1
 
+STAT_LOG="$( mktemp )"
+
 while read COMMIT; do
 	progress ${N} ${_COUNT}
 	echo -n " (${N} / ${_COUNT}) -- "
 
 	git checkout ${COMMIT} >/dev/null 2>&1
-	echo "$( git log --oneline -1 HEAD )"
+
+	COMMIT_MSG="$( git log --oneline -1 HEAD )"
+
+	echo "${COMMIT_MSG}"
 
 	eval "${*}"
-	
+
+	if [ $? -eq 0 ]; then
+		echo -e "${__OK}"
+		echo " ${__OK_} ${COMMIT_MSG}" >> ${STAT_LOG}
+	else
+		echo -e "${__NOK}"
+		echo " ${__NOK_} ${COMMIT_MSG}" >> ${STAT_LOG}
+	fi
+
 	sleep 1
 
 	(( N++ ))
 done < <( echo "${COMMITS}" )
 
-_on_break
+_on_finished
+
+exit 0
