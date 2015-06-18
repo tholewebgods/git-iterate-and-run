@@ -134,13 +134,20 @@ function _on_break() {
 	STOPPED=1
 }
 
+function _on_term(){
+	git checkout ${_CURR_BRANCH} >/dev/null 2>&1
+
+	exit 100
+}
+
 __OK="\033[0;32m✓\033[0m"
 __OK_="\\033[0;32m✓\\033[0m"
 __NOK="\033[0;31mx\033[0m"
 __NOK_="\\033[0;31mx\\033[0m"
 
 
-trap _on_break SIGINT SIGQUIT SIGTERM
+trap _on_break SIGINT SIGQUIT
+trap _on_term SIGTERM
 
 _COUNT="$( echo "${COMMITS}" | wc -l )"
 N=1
