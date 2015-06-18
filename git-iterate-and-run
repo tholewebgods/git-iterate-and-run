@@ -12,13 +12,23 @@
 
 function help(){
 	cat <<-EOF
-	Usage: $( basename ${0} ) [<branch name>] <N> -- <command> <with> <multiple> <arguments>
+	Usage: $( basename ${0} ) {<commit range>|<commit>} -- <command> <with> <multiple> <arguments>
+	       ... | $( basename ${0} ) -- <command> <with> <multiple> <arguments>
 
-	Iterate over last N commits of the current branch (optionally the specifiedbranch) and run the specified command(s)
+	Run a command either on the range of commits specified by the treeish, treeish range or read from stdin.
 
-	             N   Number of commits
-	   branch name   Branch the checkout
+          commit range   Range as treeish..treeish (some-branch-a..some-branch-b or deadbee1..badcop1)
+                commit   Base commit for range of commits until HEAD
 	    command...   Command(s) to execute
+
+        EXAMPLES
+
+          $ git-iterate-and-run deadbee1..badcop1 -- run-tests.sh  # run "run-tests.sh" for deadbee1..ba11er1
+          $ git-iterate-and-run deadbee1 -- run-tests.sh           # run "run-tests.sh" for deadbee1..HEAD
+
+          # run "run-tests.sh" for list read from stdin
+          $ git rev-list deadbee1..HEAD | git-iterate-and-run -- run-tests.sh
+
 EOF
 }
 
@@ -26,8 +36,9 @@ EOF
 #
 progress(){
 	local LENGTH=20
+	local N
 
-	PCT=$(( ( ${LENGTH} / $2 ) * $1 ))
+	PCT="$( printf "%.0f" "$( echo "scale=4; ( ${LENGTH}.0 / ${2} ) * ${1}" | bc )" )"
 	REM=$(( ${LENGTH} - ${PCT} ))
 
 	echo -n "["
@@ -46,68 +57,93 @@ fi
 
 # We need at least 3 = one own argument + the hyphens + one command
 #
-if [ ${#} -lt 3 ]; then
+if [ ${#} -lt 1 ]; then
 	echo "Not enough arguments: missing, at least, the number of commits to iterate. Try --help."
-	exit 1
+	exit 2
 fi
 
 
-_CURR_BRANCH="$( git br --contains HEAD | sed -r '/^\* /s///' )"
+if [ -n "$( git status --porcelain )" ]; then
+	echo "The workspace is dirty. Refusing to run in dirty workspace."
+	exit 3
+fi
 
-# default to current branch
-#
-_BRANCH="${_CURR_BRANCH}"
+_CURR_BRANCH="$( git branch --contains HEAD | grep -E '^\*' | sed -r 's/^\* //; s/^\([^(]+ ([^ ]+)\)/\1/' )"
+
+echo "Remembering current branch ${_CURR_BRANCH}"
 
 
-# Count own args first
-#
-OWN_PARAM_IDX=1
+if [ "$1" != "--" ]; then
+	# Parameters before the -- passed, this is a treeish
 
-while [ $( eval echo "\${${OWN_PARAM_IDX}}" ) != "--" ]; do
-	(( OWN_PARAM_IDX++ ))
-done
-
-(( OWN_PARAM_IDX-- ))
-
-# Check own arguments
-#
-if [ ${OWN_PARAM_IDX} -eq 1 ]; then
-	_COUNT="${1}"
-	shift
-elif [ ${OWN_PARAM_IDX} -eq 2 ]; then
-	_BRANCH="${1}"
-	_COUNT="${2}"
-	shift
-	shift
-else
-	shift
+	# save treeish or range
+	#
+	_RANGE_OR_TREEISH="${1}"
 	shift
 
-	# Check if there are  remaining arguments
-	while [ ${1} != "--" ]; do
-		echo "Unrecognized argument '${1}'"
+	if [[ "${_RANGE_OR_TREEISH}" =~ ^.+\.\..+$ ]]; then
+		# range
+		_RANGE="${_RANGE_OR_TREEISH}"
+	else
+		# treeish
+		_RANGE="${_RANGE_OR_TREEISH}..HEAD"
+	fi
+
+	# get list of commits (reversed by default)
+	COMMITS="$( git rev-list --reverse ${_RANGE} )"
+
+	if [ $? -ne 0 ]; then
+		echo "Error enumerating commits for range or treeish '${_RANGE}'"
+		exit 1
+	fi
+
+	if [ -z "${COMMITS}" ]; then
+		echo "No commits in range ${_RANGE} (maybe you swapped the treeishes? specify <older>..<newer>)"
 		exit 2
-	done
+	fi
+
+else
+	# No parameters before the -- passed, read from stdin
+
+	echo "Reading commit list from stdin ..."
+
+	COMMITS="$( cat /dev/stdin )"
+
+	if [ -z "${COMMITS}" ]; then
+		echo "No commits read"
+		exit 2
+	fi
 fi
 
+if [ "$1" == "--" ]; then
+	# drop "--"
+	#
+	shift
+fi
 
-# drop "--"
-#
-shift
+function _on_break() {
+	# restore
+	git checkout ${_CURR_BRANCH} >/dev/null 2>&1
+	exit 100
+}
 
+trap _on_break SIGINT SIGQUIT SIGTERM
 
-for N in $( seq 0 ${_COUNT} | sort -nr ); do
-	progress $(( ${_COUNT} - ${N} )) ${_COUNT}
-	echo -n " ($(( ${_COUNT} - ${N} + 1 )) / ${_COUNT}) -- "
+_COUNT="$( echo "${COMMITS}" | wc -l )"
+N=1
 
-	git checkout ${_BRANCH}~${N} >/dev/null 2>&1
+while read COMMIT; do
+	progress ${N} ${_COUNT}
+	echo -n " (${N} / ${_COUNT}) -- "
+
+	git checkout ${COMMIT} >/dev/null 2>&1
 	echo "$( git log --oneline -1 HEAD )"
 
 	eval "${*}"
-done
+	
+	sleep 1
 
+	(( N++ ))
+done < <( echo "${COMMITS}" )
 
-# Jump back
-#
-git checkout ${_CURR_BRANCH} >/dev/null 2>&1
-
+_on_break
