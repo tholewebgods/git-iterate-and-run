@@ -126,13 +126,12 @@ function _on_finished() {
 	git checkout ${_CURR_BRANCH} >/dev/null 2>&1
 
 	echo "--------------------------------------------------------"
-	echo -e "$( cat ${STAT_LOG} )"
+	echo -e "$( tac ${STAT_LOG} )"
 	rm ${STAT_LOG}
 }
 
 function _on_break() {
-	_on_finished
-	exit 100
+	STOPPED=1
 }
 
 __OK="\033[0;32m✓\033[0m"
@@ -147,30 +146,35 @@ _COUNT="$( echo "${COMMITS}" | wc -l )"
 N=1
 
 STAT_LOG="$( mktemp )"
+STOPPED=0
 
 while read COMMIT; do
-	progress ${N} ${_COUNT}
-	echo -n " (${N} / ${_COUNT}) -- "
-
 	git checkout ${COMMIT} >/dev/null 2>&1
-
 	COMMIT_MSG="$( git log --oneline -1 HEAD )"
 
-	echo "${COMMIT_MSG}"
+	if [ ${STOPPED} -eq 0 ]; then
+		progress ${N} ${_COUNT}
 
-	eval "${*}"
+		echo " (${N} / ${_COUNT}) -- ${COMMIT_MSG}"
 
-	if [ $? -eq 0 ]; then
-		echo -e "${__OK}"
-		echo " ${__OK_} ${COMMIT_MSG}" >> ${STAT_LOG}
+		eval "${*}"
+
+		if [ $? -eq 0 ]; then
+			echo -e "${__OK}"
+			echo " ${__OK_} ${COMMIT_MSG}" >> ${STAT_LOG}
+		elif [ ${STOPPED} -eq 1 ]; then
+			echo " - ${COMMIT_MSG}" >> ${STAT_LOG}
+		else
+			echo -e "${__NOK}"
+			echo " ${__NOK_} ${COMMIT_MSG}" >> ${STAT_LOG}
+		fi
+
+		sleep 1
+
+		(( N++ ))
 	else
-		echo -e "${__NOK}"
-		echo " ${__NOK_} ${COMMIT_MSG}" >> ${STAT_LOG}
+		echo " - ${COMMIT_MSG}" >> ${STAT_LOG}
 	fi
-
-	sleep 1
-
-	(( N++ ))
 done < <( echo "${COMMITS}" )
 
 _on_finished
