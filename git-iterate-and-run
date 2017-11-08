@@ -32,6 +32,15 @@ function help(){
 EOF
 }
 
+
+# repeat char N times
+#
+# repeat <char> <N>
+#
+repeat() {
+	for N in $( seq 1 ${2} ); do echo -n "${1}"; done
+}
+
 # progress <N> <MAX>
 #
 progress(){
@@ -43,8 +52,8 @@ progress(){
 
 	echo -n "["
 
-	for N in $( seq 1 ${PCT} ); do echo -n "="; done
-	for N in $( seq 1 ${REM} ); do echo -n " "; done
+	repeat "=" ${PCT}
+	repeat " " ${REM}
 
 	echo -n "]"
 }
@@ -150,6 +159,8 @@ trap _on_break SIGINT SIGQUIT
 trap _on_term SIGTERM
 
 _COUNT="$( echo "${COMMITS}" | wc -l )"
+_BAD_COUNT=0
+_RESULT_MAP=""
 N=1
 
 STAT_LOG="$( mktemp )"
@@ -160,18 +171,28 @@ while read COMMIT; do
 	COMMIT_MSG="$( git log --oneline -1 HEAD )"
 
 	if [ ${STOPPED} -eq 0 ]; then
-		progress ${N} ${_COUNT}
+		# Print (so-far) stats header
 
-		echo " (${N} / ${_COUNT}) -- ${COMMIT_MSG}"
+		# [====   ] >> (progressbar)
+		progress ${N} ${_COUNT}
+		# >> (5/7) >> (count)
+		echo -n " (${N} / ${_COUNT}) "
+		# >> [✓✓✓✓x  ] >> (result map)
+		echo -n -e "[${_RESULT_MAP}$( repeat '?' $(( ${_COUNT} - ${N} )) )]"
+		# >> -- Foochange (commit message)
+		echo " -- ${COMMIT_MSG}"
 
 		eval "${*}"
 
 		if [ $? -eq 0 ]; then
+			_RESULT_MAP="${_RESULT_MAP}${__OK}"
 			echo -e "${__OK}"
 			echo " ${__OK_} ${COMMIT_MSG}" >> ${STAT_LOG}
 		elif [ ${STOPPED} -eq 1 ]; then
 			echo " - ${COMMIT_MSG}" >> ${STAT_LOG}
 		else
+			_RESULT_MAP="${_RESULT_MAP}${__NOK}"
+			(( _BAD_COUNT++ ))
 			echo -e "${__NOK}"
 			echo " ${__NOK_} ${COMMIT_MSG}" >> ${STAT_LOG}
 		fi
