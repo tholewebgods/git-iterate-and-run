@@ -166,7 +166,7 @@ N=1
 STAT_LOG="$( mktemp )"
 STOPPED=0
 
-while read COMMIT; do
+for COMMIT in ${COMMITS}; do
 	git checkout ${COMMIT} >/dev/null 2>&1
 	COMMIT_MSG="$( git log --oneline -1 HEAD )"
 
@@ -203,7 +203,7 @@ while read COMMIT; do
 	else
 		echo " - ${COMMIT_MSG}" >> ${STAT_LOG}
 	fi
-done < <( echo "${COMMITS}" )
+done
 
 _on_finished
 
